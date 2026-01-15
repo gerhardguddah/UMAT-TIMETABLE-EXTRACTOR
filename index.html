@@ -3,19 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UMaT Timetable Extractor</title>
+    <title>UMaT Timetable Extractor V6</title>
     
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
-        /* UI Styling - Kept Blue/White Theme */
+        /* UI Styling */
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background: #f4f4f9; color: #333; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        .container { max-width: 1250px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
         h1 { margin-top: 0; color: #004085; }
         
-        /* Input Controls */
         .controls { margin-bottom: 20px; padding: 20px; background: #e1ecf4; border-radius: 8px; display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; }
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         label { font-weight: bold; font-size: 0.9em; color: #555; }
@@ -26,32 +25,32 @@
         button:hover { opacity: 0.9; }
 
         /* The Timetable Grid */
-        .table-wrapper { overflow-x: auto; margin-top: 20px; border-radius: 8px; border: 1px solid #ddd; background: white; padding: 5px;}
+        #tableContainer { overflow-x: auto; margin-top: 20px; border-radius: 8px; border: 1px solid #ddd; background: white; padding: 5px;}
+        
         table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-        
-        /* Headers (Times) */
         th { background-color: #007bff; color: white; padding: 12px; text-align: center; border: 1px solid #0062cc; white-space: nowrap; }
-        
-        /* First Column (Days) */
-        td:first-child { background-color: #f8f9fa; font-weight: bold; width: 100px; text-align: center; border-right: 2px solid #ddd; }
-        
-        /* Cells */
+        td:first-child { background-color: #f8f9fa; font-weight: bold; width: 100px; text-align: center; border-right: 2px solid #ddd; position: sticky; left: 0; z-index: 10;}
         td { border: 1px solid #dee2e6; padding: 8px; vertical-align: top; height: 80px; font-size: 0.9em; min-width: 120px; }
         tr:nth-child(even) td:not(:first-child) { background-color: #fdfdfd; }
         
-        /* Class Blocks */
+        /* The Class Card */
         .class-block { 
             background: #e3f2fd; color: #004085; 
-            padding: 6px; margin-bottom: 4px; border-radius: 4px; 
-            border-left: 4px solid #007bff; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            padding: 8px; margin-bottom: 4px; border-radius: 4px; 
+            border-left: 5px solid #007bff; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            /* Center content if spanning multiple cells */
+            display: flex; flex-direction: column; justify-content: center; height: 100%;
+            box-sizing: border-box;
         }
-        .class-room { font-weight: bold; font-size: 0.85em; color: #d63384; display: block; margin-bottom: 2px; }
+        .class-time { font-size: 0.75em; color: #666; font-weight: bold; letter-spacing: 0.5px; margin-bottom: 3px; display: block;}
+        .class-room { font-weight: bold; font-size: 0.9em; color: #d63384; margin-bottom: 2px; display: block;}
+        .class-details { font-size: 0.9em; line-height: 1.3; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>📅 UMaT Timetable Extractor </h1>
+    <h1>📅 UMaT Timetable Extractor V6</h1>
     <p>GG</p>
     <h4> NB ⚠️ Always specify your class section (2A, 2B, 3A, 3B etc.) to see the correct classes.</h4>
 
@@ -74,15 +73,15 @@
         <button onclick="processFile()" style="background: #007bff;">Generate Table</button>
         
         <div style="margin-left: auto; display: flex; gap: 8px;">
-            <button onclick="downloadExcel()" style="background: #217346;">Excel (Grid)</button>
-            <button onclick="downloadImage()" style="background: #6610f2;">Image (Phone)</button>
+            <button onclick="downloadExcel()" style="background: #217346;">Excel</button>
+            <button onclick="downloadImage()" style="background: #6610f2;">Image</button>
             <button onclick="downloadPDF()" style="background: #dc3545;">PDF</button>
         </div>
     </div>
 
     <div id="status"></div>
     
-    <div class="table-wrapper" id="captureArea">
+    <div class="table-wrapper" id="tableContainer">
         <table id="timetableGrid">
             <thead id="gridHead"></thead>
             <tbody id="gridBody"></tbody>
@@ -92,7 +91,7 @@
 
 <script>
     let extractedData = [];
-    let timeSlots = new Set(); 
+    let slotHeaders = new Set(); 
 
     async function processFile() {
         const fileInput = document.getElementById('upload');
@@ -112,24 +111,32 @@
             const workbook = XLSX.read(data, {type: 'array'});
             
             extractedData = [];
-            timeSlots = new Set();
+            slotHeaders = new Set();
 
             workbook.SheetNames.forEach(sheetName => {
                 if (sheetName.toLowerCase().includes("summary")) return;
                 const sheet = workbook.Sheets[sheetName];
                 const range = XLSX.utils.decode_range(sheet['!ref']);
+                const merges = sheet['!merges'] || [];
 
-                // Scan Headers
-                for (let C = 2; C <= range.e.c; ++C) {
+                // 1. SCAN HEADERS (Row 7)
+                // Widen scan to 24 columns to catch late classes
+                let maxCol = Math.max(range.e.c, 24); 
+                
+                for (let C = 2; C <= maxCol; ++C) {
                     const timeCell = sheet[XLSX.utils.encode_cell({c:C, r:6})]; 
                     if (timeCell && timeCell.v) {
-                        timeSlots.add(timeCell.v.toString().trim());
+                        let tVal = timeCell.v.toString().trim();
+                        // Heuristic: If it has a digit, it's a time header
+                        if (tVal.match(/\d/)) {
+                            slotHeaders.add(tVal);
+                        }
                     }
                 }
 
-                // Scan Data
+                // 2. SCAN DATA
                 for (let R = 7; R <= range.e.r; ++R) { 
-                    for (let C = 2; C <= range.e.c; ++C) { 
+                    for (let C = 2; C <= maxCol; ++C) { 
                         const cell = sheet[XLSX.utils.encode_cell({c:C, r:R})];
                         
                         if (cell && cell.v) {
@@ -137,22 +144,42 @@
                             let match = false;
                             
                             if (cellText.includes(deptCode)) {
-                                if (streamCode === "") {
-                                    match = true;
-                                } else {
-                                    if (cellText.includes(streamCode)) match = true;
-                                }
+                                if (streamCode === "") match = true;
+                                else if (cellText.includes(streamCode)) match = true;
                             }
 
                             if (match) {
-                                const timeVal = sheet[XLSX.utils.encode_cell({c:C, r:6})].v.trim();
+                                // --- DURATION & MERGE FIX ---
+                                let startHeader = sheet[XLSX.utils.encode_cell({c:C, r:6})] ? sheet[XLSX.utils.encode_cell({c:C, r:6})].v : "";
+                                let finalTimeDisplay = startHeader; 
+                                let durationCols = 1; // Default duration
+
+                                // Check if merged
+                                let mergeInfo = merges.find(m => m.s.r === R && m.s.c === C);
+                                if (mergeInfo) {
+                                    // Calculate how many columns wide this class is
+                                    durationCols = mergeInfo.e.c - mergeInfo.s.c + 1;
+                                    
+                                    // Update Label (e.g., 7:00 - 9:00)
+                                    let endCol = mergeInfo.e.c;
+                                    let endHeader = sheet[XLSX.utils.encode_cell({c:endCol, r:6})] ? sheet[XLSX.utils.encode_cell({c:endCol, r:6})].v : "";
+                                    
+                                    if (startHeader && endHeader) {
+                                        let startPart = startHeader.split("-")[0];
+                                        let endPart = endHeader.split("-")[1] || endHeader;
+                                        finalTimeDisplay = `${startPart} - ${endPart}`;
+                                    }
+                                }
+
                                 const roomVal = sheet[XLSX.utils.encode_cell({c:0, r:R})] ? sheet[XLSX.utils.encode_cell({c:0, r:R})].v : "Unknown";
 
                                 extractedData.push({
                                     day: sheetName,
-                                    time: timeVal,
+                                    slotTime: startHeader, // The "key" for the column
+                                    displayTime: finalTimeDisplay, // The text to show
                                     room: roomVal,
-                                    details: cell.v
+                                    details: cell.v,
+                                    duration: durationCols // Store integer duration (1, 2, 3...)
                                 });
                             }
                         }
@@ -162,6 +189,27 @@
             buildGrid();
         };
         reader.readAsArrayBuffer(file);
+    }
+
+    // Improved Time Parser (Handles Minutes for 1:30 vs 1:00)
+    function parseTimeValue(timeStr) {
+        // Regex to find "HH:MM"
+        let match = timeStr.match(/(\d+):(\d+)/);
+        let h, m = 0;
+        
+        if (match) {
+            h = parseInt(match[1]);
+            m = parseInt(match[2]);
+        } else {
+            match = timeStr.match(/(\d+)/);
+            if (!match) return 9999;
+            h = parseInt(match[1]);
+        }
+
+        // Logic: 7-11 is AM. 12 is 12PM. 1-6 is PM (13-18).
+        if (h >= 1 && h <= 6) h += 12;
+        
+        return h * 60 + m; // Return total minutes for sorting
     }
 
     function buildGrid() {
@@ -175,10 +223,12 @@
             return;
         }
 
-        let sortedTimes = Array.from(timeSlots).sort(); 
+        // Sort headers chronologically
+        let sortedSlots = Array.from(slotHeaders).sort((a, b) => parseTimeValue(a) - parseTimeValue(b));
         
+        // Header Row
         let headerRow = "<tr><th>Day</th>";
-        sortedTimes.forEach(time => { headerRow += `<th>${time}</th>`; });
+        sortedSlots.forEach(time => { headerRow += `<th>${time}</th>`; });
         headerRow += "</tr>";
         thead.innerHTML = headerRow;
 
@@ -190,43 +240,83 @@
             tdDay.innerText = day;
             tr.appendChild(tdDay);
 
-            sortedTimes.forEach(time => {
-                let td = document.createElement("td");
-                let classes = extractedData.filter(d => d.day === day && d.time === time);
+            // Iterate slots with a loop that can SKIP indices
+            for (let i = 0; i < sortedSlots.length; i++) {
+                let slot = sortedSlots[i];
                 
-                if (classes.length > 0) {
+                // Find class starting at this slot
+                let classes = extractedData.filter(d => d.day === day && d.slotTime === slot);
+                
+                let cellSpan = 1;
+                let hasClass = classes.length > 0;
+                
+                if (hasClass) {
+                    // Use the duration of the class found. 
+                    // If multiple conflicts, take the max duration to be safe.
+                    cellSpan = Math.max(...classes.map(c => c.duration));
+                }
+
+                // Render Cell
+                let td = document.createElement("td");
+                
+                // --- THE MAGIC: COLSPAN ---
+                if (cellSpan > 1) {
+                    td.colSpan = cellSpan;
+                    td.style.textAlign = "center"; 
+                }
+
+                if (hasClass) {
                     classes.forEach(c => {
                         let div = document.createElement("div");
                         div.className = "class-block";
-                        div.innerHTML = `<span class="class-room">📍 ${c.room}</span><span class="class-details">${c.details}</span>`;
+                        div.innerHTML = `
+                            <span class="class-time">⏰ ${c.displayTime}</span>
+                            <span class="class-room">📍 ${c.room}</span>
+                            <span class="class-details">${c.details}</span>
+                        `;
                         td.appendChild(div);
                     });
                 }
+                
                 tr.appendChild(td);
-            });
+
+                // SKIP the next slots if we spanned them
+                // e.g. if duration is 2, we span this one (i) and skip the next one (i+1)
+                if (cellSpan > 1) {
+                    i += (cellSpan - 1);
+                }
+            }
             tbody.appendChild(tr);
         });
     }
 
-    // 3. ADDED: New Download Functions
-
-    // Option A: Excel (Preserves the Grid Layout)
+    // Export Functions (Unchanged)
     function downloadExcel() {
-        if(extractedData.length === 0) { alert("Generate the table first!"); return; }
-        
-        // Grab the HTML Table directly
+        if(extractedData.length === 0) { alert("Generate table first!"); return; }
         let table = document.getElementById("timetableGrid");
         let wb = XLSX.utils.table_to_book(table, {sheet: "Schedule"});
         XLSX.writeFile(wb, "UMaT_Timetable.xlsx");
     }
 
-    // Option B: Image (Best for Phones)
     function downloadImage() {
-        if(extractedData.length === 0) { alert("Generate the table first!"); return; }
+        if(extractedData.length === 0) { alert("Generate table first!"); return; }
+        const element = document.getElementById("tableContainer");
+        const originalOverflow = element.style.overflow;
+        const originalWidth = element.style.width;
         
-        const element = document.getElementById("captureArea");
+        element.style.overflow = "visible"; 
+        element.style.width = "fit-content"; 
         
-        html2canvas(element).then(canvas => {
+        html2canvas(element, {
+            scrollX: 0,
+            scrollY: -window.scrollY,
+            windowWidth: document.documentElement.offsetWidth,
+            height: element.scrollHeight,
+            width: element.scrollWidth,
+            scale: 2 
+        }).then(canvas => {
+            element.style.overflow = originalOverflow;
+            element.style.width = originalWidth;
             const link = document.createElement("a");
             link.download = 'my_timetable.png';
             link.href = canvas.toDataURL();
@@ -234,21 +324,29 @@
         });
     }
 
-    // Option C: PDF (Standard Document)
     function downloadPDF() {
-        if(extractedData.length === 0) { alert("Generate the table first!"); return; }
+        if(extractedData.length === 0) { alert("Generate table first!"); return; }
+        const element = document.getElementById("tableContainer");
+        const originalOverflow = element.style.overflow;
+        const originalWidth = element.style.width;
         
-        const element = document.getElementById("captureArea");
-        const { jsPDF } = window.jspdf;
+        element.style.overflow = "visible"; 
+        element.style.width = "fit-content"; 
 
-        html2canvas(element).then(canvas => {
+        html2canvas(element, {
+            scrollX: 0, 
+            width: element.scrollWidth,
+            height: element.scrollHeight,
+            scale: 2
+        }).then(canvas => {
+            element.style.overflow = originalOverflow;
+            element.style.width = originalWidth;
             const imgData = canvas.toDataURL('image/png');
-            // A4 Landscape size logic
-            const pdf = new jsPDF('l', 'mm', 'a4');
-            const imgProps = pdf.getImageProperties(imgData);
+            const { jsPDF } = window.jspdf;
+            const orientation = canvas.width > canvas.height ? 'l' : 'p';
+            const pdf = new jsPDF(orientation, 'mm', 'a4');
             const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-            
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
             pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
             pdf.save("timetable.pdf");
         });
