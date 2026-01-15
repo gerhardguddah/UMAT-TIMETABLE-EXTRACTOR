@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UMaT Timetable Extractor </title>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <style>
+        /* UI Styling - Kept Blue/White Theme */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background: #f4f4f9; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        h1 { margin-top: 0; color: #004085; }
+        
+        /* Input Controls */
+        .controls { margin-bottom: 20px; padding: 20px; background: #e1ecf4; border-radius: 8px; display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-weight: bold; font-size: 0.9em; color: #555; }
+        input[type="text"] { padding: 10px; border: 1px solid #ccc; border-radius: 6px; min-width: 120px; }
+        input[type="file"] { padding: 8px; background: white; border-radius: 6px; border: 1px solid #ccc; }
+        
+        button { background: #007bff; color: white; border: none; padding: 12px 25px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 1em; transition: background 0.2s; }
+        button:hover { background: #0056b3; }
+
+        /* The Timetable Grid */
+        .table-wrapper { overflow-x: auto; margin-top: 20px; border-radius: 8px; border: 1px solid #ddd; }
+        table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+        
+        /* Headers (Times) */
+        th { background-color: #007bff; color: white; padding: 12px; text-align: center; border: 1px solid #0062cc; white-space: nowrap; position: sticky; top: 0; }
+        
+        /* First Column (Days) */
+        td:first-child { background-color: #f8f9fa; font-weight: bold; width: 100px; text-align: center; border-right: 2px solid #ddd; }
+        
+        /* Cells */
+        td { border: 1px solid #dee2e6; padding: 8px; vertical-align: top; height: 80px; font-size: 0.9em; min-width: 120px; }
+        tr:nth-child(even) td:not(:first-child) { background-color: #fdfdfd; }
+        
+        /* Class Blocks */
+        .class-block { 
+            background: #e3f2fd; color: #004085; 
+            padding: 6px; margin-bottom: 4px; border-radius: 4px; 
+            border-left: 4px solid #007bff; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .class-room { font-weight: bold; font-size: 0.85em; color: #d63384; display: block; margin-bottom: 2px; }
+        .class-details { display: block; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>📅 UMaT Timetable Extractor </h1>
+    <p>GG</p>
+    
+     <h4> NB ⚠️ Always specify your class section (2A, 2B, 3A, 3B etc.) to see the correct classes.</h4>
+      
+
+    <div class="controls">
+        <div class="input-group">
+            <label>1. Upload Excel File</label>
+            <input type="file" id="upload" accept=".xlsx, .xls" />
+        </div>
+        
+        <div class="input-group">
+            <label>2. COURSE NAME</label>
+            <input type="text" id="deptCode" value="CE" placeholder="e.g. CE">
+        </div>
+
+        <div class="input-group">
+            <label>3. Year/Stream (Optional)</label>
+            <input type="text" id="streamCode" value="3A" placeholder="e.g. 3A, 3B, 2C">
+        </div>
+
+        <button onclick="processFile()">Generate Table</button>
+        <button onclick="downloadCSV()" style="background: #28a745; margin-left: auto;">Download CSV</button>
+    </div>
+
+    <div id="status"></div>
+    
+    <div class="table-wrapper">
+        <table id="timetableGrid">
+            <thead id="gridHead"></thead>
+            <tbody id="gridBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    let extractedData = [];
+    let timeSlots = []; // To store unique headers like "7:00-8:00"
+
+    async function processFile() {
+        const fileInput = document.getElementById('upload');
+        const deptCode = document.getElementById('deptCode').value.toUpperCase().trim();
+        const streamCode = document.getElementById('streamCode').value.toUpperCase().trim();
+        
+        if (!fileInput.files.length) {
+            alert("Please select a file first!");
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            
+            extractedData = [];
+            timeSlots = new Set(); // Use a Set to avoid duplicates
+
+            // 1. SCANNING PHASE
+            workbook.SheetNames.forEach(sheetName => {
+                if (sheetName.toLowerCase().includes("summary")) return;
+
+                const sheet = workbook.Sheets[sheetName];
+                const range = XLSX.utils.decode_range(sheet['!ref']);
+
+                // Scan headers in Row 7 to find all Time Slots
+                for (let C = 2; C <= range.e.c; ++C) {
+                    const timeCell = sheet[XLSX.utils.encode_cell({c:C, r:6})]; // Row 7
+                    if (timeCell && timeCell.v) {
+                        timeSlots.add(timeCell.v.toString().trim());
+                    }
+                }
+
+                // Scan Data
+                for (let R = 7; R <= range.e.r; ++R) { 
+                    for (let C = 2; C <= range.e.c; ++C) { 
+                        
+                        const cell = sheet[XLSX.utils.encode_cell({c:C, r:R})];
+                        
+                        if (cell && cell.v) {
+                            let cellText = String(cell.v).toUpperCase();
+
+                            // LOGIC: Must contain Dept AND (Stream OR be generic)
+                            // If stream is empty, just match Dept
+                            // If stream is "3A", match "CE...3A" or "CE...3A & 3B"
+                            let match = false;
+                            
+                            if (cellText.includes(deptCode)) {
+                                if (streamCode === "") {
+                                    match = true;
+                                } else {
+                                    // Check if the specific stream code exists in the cell
+                                    // This works for "CE 3A" and "CE 3A & 3B"
+                                    if (cellText.includes(streamCode)) {
+                                        match = true;
+                                    }
+                                }
+                            }
+
+                            if (match) {
+                                const timeVal = sheet[XLSX.utils.encode_cell({c:C, r:6})].v.trim();
+                                const roomVal = sheet[XLSX.utils.encode_cell({c:0, r:R})] ? sheet[XLSX.utils.encode_cell({c:0, r:R})].v : "Unknown";
+
+                                extractedData.push({
+                                    day: sheetName,
+                                    time: timeVal,
+                                    room: roomVal,
+                                    details: cell.v
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+
+            buildGrid();
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function buildGrid() {
+        const thead = document.getElementById('gridHead');
+        const tbody = document.getElementById('gridBody');
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+
+        if (extractedData.length === 0) {
+            alert("No classes found. Check your codes (e.g., 'CE' and '3A').");
+            return;
+        }
+
+        // 1. Sort Times and Build Header
+        // Convert Set to Array and sort reasonably (simple string sort for now works for 7:00 vs 8:00)
+        let sortedTimes = Array.from(timeSlots).sort(); 
+        
+        let headerRow = "<tr><th>Day</th>";
+        sortedTimes.forEach(time => {
+            headerRow += `<th>${time}</th>`;
+        });
+        headerRow += "</tr>";
+        thead.innerHTML = headerRow;
+
+        // 2. Build Rows for Days
+        const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+        
+        days.forEach(day => {
+            let tr = document.createElement("tr");
+            
+            // Day Label
+            let tdDay = document.createElement("td");
+            tdDay.innerText = day;
+            tr.appendChild(tdDay);
+
+            // Time Cells
+            sortedTimes.forEach(time => {
+                let td = document.createElement("td");
+                
+                // Find classes for this Day + Time
+                let classes = extractedData.filter(d => d.day === day && d.time === time);
+                
+                if (classes.length > 0) {
+                    classes.forEach(c => {
+                        let div = document.createElement("div");
+                        div.className = "class-block";
+                        div.innerHTML = `<span class="class-room">📍 ${c.room}</span><span class="class-details">${c.details}</span>`;
+                        td.appendChild(div);
+                    });
+                }
+                
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function downloadCSV() {
+        let csvContent = "data:text/csv;charset=utf-8,Day,Time,Classroom,Details\n";
+        extractedData.forEach(row => {
+            let cleanDetails = row.details.replace(/(\r\n|\n|\r)/gm, " ").replace(/,/g, " "); 
+            csvContent += `${row.day},${row.time},${row.room},${cleanDetails}\n`;
+        });
+        const link = document.createElement("a");
+        link.setAttribute("href", encodeURI(csvContent));
+        link.setAttribute("download", "my_timetable_grid.csv");
+        document.body.appendChild(link);
+        link.click();
+    }
+</script>
+
+</body>
+</html>
